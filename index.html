@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SG Price Compare</title>
+<style>
+:root{font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#171717;background:#f6f6f3}
+body{margin:0}.wrap{max-width:1100px;margin:auto;padding:24px}
+h1{margin:0 0 6px;font-size:28px}.sub{color:#666;margin-bottom:22px}
+.bar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+input,button{font:inherit;padding:11px 13px;border:1px solid #bbb;border-radius:8px}
+input{background:#fff}.query{flex:1;min-width:240px}button{background:#111;color:#fff;border-color:#111;cursor:pointer}
+button.secondary{background:#fff;color:#111}.key{width:min(100%,480px)}
+.status{min-height:24px;color:#666;font-size:14px;margin:8px 0 16px}
+.card{background:#fff;border:1px solid #ddd;border-radius:12px;margin:10px 0;padding:14px}
+.row{display:grid;grid-template-columns:1fr 110px 110px 110px 100px;gap:12px;align-items:center}
+.head{font-size:12px;color:#777;font-weight:600}.title{font-weight:650}.meta{font-size:13px;color:#666;margin-top:4px}
+.price{font-weight:700;text-align:right}.num{text-align:right}.buy{text-align:right}
+a{color:inherit}.empty{padding:35px;text-align:center;color:#777;background:#fff;border:1px dashed #ccc;border-radius:12px}
+.small{font-size:12px;color:#777}.history{margin-top:28px}.history table{width:100%;border-collapse:collapse;background:#fff}
+.history th,.history td{padding:9px;border-bottom:1px solid #eee;text-align:left;font-size:13px}
+@media(max-width:750px){.row{grid-template-columns:1fr 90px 90px}.row>*:nth-child(3),.row>*:nth-child(4){display:none}.buy{text-align:left}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>SG Price Compare</h1>
+  <div class="sub">Search Singapore product prices using BuyWhere.</div>
+
+  <div class="bar">
+    <input id="q" class="query" placeholder="e.g. UGREEN DXP2800" value="UGREEN DXP2800">
+    <button id="search">Search</button>
+  </div>
+  <div class="bar">
+    <input id="key" class="key" type="password" placeholder="BuyWhere API key (stored only in this browser)">
+    <button id="save" class="secondary">Save key</button>
+    <button id="clear" class="secondary">Clear history</button>
+  </div>
+
+  <div id="status" class="status"></div>
+  <div id="results"><div class="empty">Enter your BuyWhere API key, then search.</div></div>
+  <div class="history">
+    <h2>Price history</h2>
+    <div id="hist"><div class="small">No history yet.</div></div>
+  </div>
+</div>
+
+<script>
+const API='https://api.buywhere.ai/v1/products/search';
+const keyEl=document.getElementById('key');
+const qEl=document.getElementById('q');
+const statusEl=document.getElementById('status');
+const resultsEl=document.getElementById('results');
+const histEl=document.getElementById('hist');
+
+keyEl.value=localStorage.getItem('buywhere_key')||'';
+
+function money(v,c='SGD'){
+  if(v==null || isNaN(v)) return '—';
+  return new Intl.NumberFormat('en-SG',{style:'currency',currency:c}).format(Number(v));
+}
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+
+function saveKey(){
+  localStorage.setItem('buywhere_key',keyEl.value.trim());
+  statusEl.textContent='API key saved locally in this browser.';
+}
+document.getElementById('save').onclick=saveKey;
+
+function historyGet(){return JSON.parse(localStorage.getItem('sg_price_history')||'[]')}
+function historySave(rows){
+  const now=new Date().toISOString();
+  const h=historyGet();
+  rows.forEach(p=>{
+    h.push({time:now,id:p.id||'',name:p.title||p.name||'',price:Number(p.price),domain:p.domain||p.merchant||''});
+  });
+  localStorage.setItem('sg_price_history',JSON.stringify(h.slice(-1000)));
+  renderHistory();
+}
+function renderHistory(){
+  const h=historyGet().slice().reverse().slice(0,100);
+  if(!h.length){histEl.innerHTML='<div class="small">No history yet.</div>';return}
+  histEl.innerHTML='<table><thead><tr><th>Date</th><th>Product</th><th>Retailer</th><th>Price</th></tr></thead><tbody>'+
+    h.map(x=>`<tr><td>${new Date(x.time).toLocaleString('en-SG')}</td><td>${esc(x.name)}</td><td>${esc(x.domain)}</td><td>${money(x.price)}</td></tr>`).join('')+
+    '</tbody></table>';
+}
+
+function render(rows){
+  if(!rows.length){resultsEl.innerHTML='<div class="empty">No results found.</div>';return}
+  rows.sort((a,b)=>(a.price??Infinity)-(b.price??Infinity));
+  resultsEl.innerHTML=`<div class="card row head"><div>PRODUCT / RETAILER</div><div class="num">PRICE</div><div class="num">SHIPPING</div><div class="num">EFFECTIVE</div><div></div></div>`+
+  rows.map(p=>{
+    const price=Number(p.price);
+    const shipping=Number(p.shipping_price ?? p.shipping ?? 0);
+    const effective=price+(isNaN(shipping)?0:shipping);
+    return `<div class="card row">
+      <div><div class="title">${esc(p.title||p.name||'Unnamed product')}</div>
+      <div class="meta">${esc(p.domain||p.merchant||p.source||'')}</div></div>
+      <div class="price">${money(price,p.currency||'SGD')}</div>
+      <div class="num">${shipping?money(shipping,p.currency||'SGD'):'Free / —'}</div>
+      <div class="price">${money(effective,p.currency||'SGD')}</div>
+      <div class="buy">${p.url?`<a href="${esc(p.url)}" target="_blank" rel="noopener">View ↗</a>`:''}</div>
+    </div>`;
+  }).join('');
+}
+
+async function search(){
+  const key=keyEl.value.trim(), q=qEl.value.trim();
+  if(!key){statusEl.textContent='Enter your BuyWhere API key first.';return}
+  if(!q){statusEl.textContent='Enter a product to search.';return}
+  localStorage.setItem('buywhere_key',key);
+  statusEl.textContent='Searching…'; resultsEl.innerHTML='';
+  try{
+    const url=API+'?'+new URLSearchParams({q,deliver_to:'SG',country_code:'SG',limit:'20'});
+    const r=await fetch(url,{headers:{Authorization:'Bearer '+key}});
+    const data=await r.json();
+    if(!r.ok) throw new Error(data?.detail||data?.message||`HTTP ${r.status}`);
+    const rows=data.data||data.items||data.products||[];
+    render(rows); historySave(rows);
+    statusEl.textContent=`Found ${rows.length} result${rows.length===1?'':'s'}.`;
+  }catch(e){
+    statusEl.textContent='Search failed: '+e.message;
+    resultsEl.innerHTML='<div class="empty">Check your API key and browser/API access. The app does not store your key anywhere except this browser.</div>';
+  }
+}
+document.getElementById('search').onclick=search;
+qEl.addEventListener('keydown',e=>{if(e.key==='Enter')search()});
+document.getElementById('clear').onclick=()=>{localStorage.removeItem('sg_price_history');renderHistory()};
+renderHistory();
+</script>
+</body>
+</html>
